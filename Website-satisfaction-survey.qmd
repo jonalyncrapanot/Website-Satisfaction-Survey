@@ -1,0 +1,802 @@
+---
+title: "E-commerce Website Design, Satisfaction, Trust and Loyalty"
+subtitle: "Survey analysis in R (n = 73 respondents, 26 Likert items on a 1-10 scale)"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-fold: true
+    code-summary: "Show code"
+execute:
+  warning: false
+  message: false
+---
+
+## About this report
+
+Respondents rated an e-commerce website after using it. The 26 questions group into eight constructs:
+
+| Construct | Items | Role in the analysis |
+|---|---|---|
+| Typography | q1-q3 | Design feature |
+| Color | q4-q5 | Design feature |
+| Content quality | q6-q8 | Design feature |
+| Interactivity | q9-q13 | Design feature |
+| Navigation | q14-q18 | Design feature |
+| Satisfaction | q19-q22 | Outcome |
+| Trust | q23-q24 | Outcome |
+| Loyalty | q25-q26 | Outcome |
+
+Every chunk below is self-contained and follows the same six steps: **1 Library, 2 Data Connection, 3 Data Cleaning, 4 Data Preparation, 5 Analysis, 6 Conclusion.**
+
+Put `dataset.csv` in the same folder as this file (or change `DATA_PATH` in each chunk).
+
+
+## 1. Descriptive statistics and data quality
+
+```{r}
+#| label: c1-descriptives
+#| fig-width: 9
+#| fig-height: 5
+# ---- 1. LIBRARY ----
+install.packages(c("dplyr", "tidyr", "ggplot2", "readr", "psych", "car"), dependencies = TRUE)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+
+# ---- 2. DATA CONNECTION / DATA SOURCE ----
+DATA_PATH <- "C:/Users/jonalyn.rapanot/OneDrive - Robinsons Retail Holdings Inc/01_CI Team/08_Github/05_Portfolio/Website-Satisfaction-Survey/dataset.csv"    # same folder as this .qmd, or give the full path
+
+DATA_PATH <-      # same folder as this .qmd, or give the full path
+raw <- read_csv(DATA_PATH, na = c("", "NA", "null"), show_col_types = FALSE)
+cat("Loaded", nrow(raw), "rows x", ncol(raw), "columns\n")
+
+# ---- 3. DATA CLEANING ----
+items <- paste0("q", 1:26)
+df <- raw |>
+  distinct(user_id, .keep_all = TRUE) |>                      # drop duplicate respondents
+  mutate(across(where(is.character), trimws),
+         gender   = factor(tolower(gender), levels = c("male", "female", "other")),
+         platform = factor(platform, levels = c("Desktop", "Mobile")),   # "null" became NA
+         language = factor(language),
+         across(all_of(items), ~ ifelse(.x >= 1 & .x <= 10, .x, NA)),    # valid scale is 1-10
+         age = ifelse(age >= 10 & age <= 100, age, NA)) |>               # implausible ages -> NA
+  filter(if_any(all_of(items), ~ !is.na(.x)))                            # drop empty responses
+cat("Respondents after cleaning:", nrow(df), "\n")
+cat("Ages set to NA (implausible, under 10):", sum(is.na(df$age)), "\n")
+cat("Respondents with unknown platform:", sum(is.na(df$platform)), "\n")
+cat("Missing item answers:", sum(is.na(df[items])), "\n")
+
+# ---- 4. DATA PREPARATION ----
+ALPHA <- 0.05
+constructs <- list(
+  Typography    = paste0("q", 1:3),
+  Color         = paste0("q", 4:5),
+  Content       = paste0("q", 6:8),
+  Interactivity = paste0("q", 9:13),
+  Navigation    = paste0("q", 14:18),
+  Satisfaction  = paste0("q", 19:22),
+  Trust         = paste0("q", 23:24),
+  Loyalty       = paste0("q", 25:26)
+)
+design_cols    <- c("Typography", "Color", "Content", "Interactivity", "Navigation")
+outcome_cols   <- c("Satisfaction", "Trust", "Loyalty")
+construct_cols <- c(design_cols, outcome_cols)
+for (nm in names(constructs)) {
+  df[[nm]] <- rowMeans(as.matrix(df[constructs[[nm]]]), na.rm = TRUE)   # construct score = mean of its items
+}
+df$Design_Overall <- rowMeans(as.matrix(df[design_cols]))
+df$Straightliner  <- apply(as.matrix(df[items]), 1, function(r) length(unique(r[!is.na(r)])) == 1)
+
+# ---- 5. ANALYSIS ----
+cat("\n--- Respondent profile ---\n")
+print(table(Platform = df$platform, useNA = "ifany"))
+print(table(Gender = df$gender))
+print(table(Language = df$language))
+cat("Age: mean", round(mean(df$age, na.rm = TRUE), 1), "| median", median(df$age, na.rm = TRUE),
+    "| range", min(df$age, na.rm = TRUE), "-", max(df$age, na.rm = TRUE), "\n")
+cat("Straight-line responders (same answer to every item):", sum(df$Straightliner), "\n")
+
+construct_of <- setNames(rep(names(constructs), lengths(constructs)), unname(unlist(constructs)))
+item_stats <- df |>
+  select(all_of(items)) |>
+  pivot_longer(everything(), names_to = "item", values_to = "score") |>
+  group_by(item) |>
+  summarise(n = sum(!is.na(score)), mean = mean(score, na.rm = TRUE), median = median(score, na.rm = TRUE),
+            sd = sd(score, na.rm = TRUE), min = min(score, na.rm = TRUE), max = max(score, na.rm = TRUE),
+            .groups = "drop") |>
+  mutate(construct = factor(unname(construct_of[item]), levels = names(constructs)),
+         item = factor(item, levels = items)) |>
+  arrange(item) |>
+  mutate(across(where(is.double), ~ round(.x, 2)))
+cat("\n--- Item statistics ---\n")
+print(as.data.frame(item_stats))
+
+construct_stats <- data.frame(
+  construct = construct_cols,
+  mean   = round(sapply(df[construct_cols], mean), 2),
+  median = round(sapply(df[construct_cols], median), 2),
+  sd     = round(sapply(df[construct_cols], sd), 2),
+  row.names = NULL)
+cat("\n--- Construct scores (mean of items) ---\n")
+print(construct_stats)
+
+print(ggplot(item_stats, aes(item, mean, fill = construct)) + geom_col() +
+  coord_cartesian(ylim = c(1, 10)) +
+  labs(title = "Mean score per question", x = NULL, y = "Mean (1-10)", fill = "Construct") + theme_minimal())
+
+long <- df |> select(all_of(construct_cols)) |>
+  pivot_longer(everything(), names_to = "construct", values_to = "score") |>
+  mutate(construct = factor(construct, levels = construct_cols))
+print(ggplot(long, aes(construct, score, fill = construct)) + geom_boxplot(show.legend = FALSE) +
+  labs(title = "Distribution of construct scores", x = NULL, y = "Score (1-10)") + theme_minimal())
+
+# ---- 6. CONCLUSION ----
+best  <- item_stats |> slice_max(mean, n = 1, with_ties = FALSE)
+worst <- item_stats |> slice_min(mean, n = 1, with_ties = FALSE)
+cat(sprintf("Highest-rated question: %s (mean %.2f). Lowest-rated question: %s (mean %.2f).\n",
+            as.character(best$item), best$mean, as.character(worst$item), worst$mean))
+cs <- construct_stats[order(-construct_stats$mean), ]
+cat(sprintf("Highest-rated construct: %s (%.2f). Lowest-rated construct: %s (%.2f).\n",
+            cs$construct[1], cs$mean[1], cs$construct[nrow(cs)], cs$mean[nrow(cs)]))
+cat(sprintf("Overall satisfaction averages %.2f/10, trust %.2f/10, loyalty %.2f/10.\n",
+            mean(df$Satisfaction), mean(df$Trust), mean(df$Loyalty)))
+cat(sprintf("Sample is %.0f%% mobile among those with a known platform; Desktop n = %d, so platform comparisons have little power.\n",
+            100 * mean(df$platform[!is.na(df$platform)] == "Mobile"), sum(df$platform == "Desktop", na.rm = TRUE)))
+```
+
+
+## 2. Scale reliability (Cronbach's alpha)
+
+```{r}
+#| label: c2-reliability
+#| fig-width: 9
+#| fig-height: 5
+# ---- 1. LIBRARY ----
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(psych)
+
+# ---- 2. DATA CONNECTION / DATA SOURCE ----
+DATA_PATH <- "dataset.csv"     # same folder as this .qmd, or give the full path
+raw <- read_csv(DATA_PATH, na = c("", "NA", "null"), show_col_types = FALSE)
+cat("Loaded", nrow(raw), "rows x", ncol(raw), "columns\n")
+
+# ---- 3. DATA CLEANING ----
+items <- paste0("q", 1:26)
+df <- raw |>
+  distinct(user_id, .keep_all = TRUE) |>                      # drop duplicate respondents
+  mutate(across(where(is.character), trimws),
+         gender   = factor(tolower(gender), levels = c("male", "female", "other")),
+         platform = factor(platform, levels = c("Desktop", "Mobile")),   # "null" became NA
+         language = factor(language),
+         across(all_of(items), ~ ifelse(.x >= 1 & .x <= 10, .x, NA)),    # valid scale is 1-10
+         age = ifelse(age >= 10 & age <= 100, age, NA)) |>               # implausible ages -> NA
+  filter(if_any(all_of(items), ~ !is.na(.x)))                            # drop empty responses
+cat("Respondents after cleaning:", nrow(df), "\n")
+cat("Ages set to NA (implausible, under 10):", sum(is.na(df$age)), "\n")
+cat("Respondents with unknown platform:", sum(is.na(df$platform)), "\n")
+cat("Missing item answers:", sum(is.na(df[items])), "\n")
+
+# ---- 4. DATA PREPARATION ----
+ALPHA <- 0.05
+constructs <- list(
+  Typography    = paste0("q", 1:3),
+  Color         = paste0("q", 4:5),
+  Content       = paste0("q", 6:8),
+  Interactivity = paste0("q", 9:13),
+  Navigation    = paste0("q", 14:18),
+  Satisfaction  = paste0("q", 19:22),
+  Trust         = paste0("q", 23:24),
+  Loyalty       = paste0("q", 25:26)
+)
+design_cols    <- c("Typography", "Color", "Content", "Interactivity", "Navigation")
+outcome_cols   <- c("Satisfaction", "Trust", "Loyalty")
+construct_cols <- c(design_cols, outcome_cols)
+for (nm in names(constructs)) {
+  df[[nm]] <- rowMeans(as.matrix(df[constructs[[nm]]]), na.rm = TRUE)   # construct score = mean of its items
+}
+df$Design_Overall <- rowMeans(as.matrix(df[design_cols]))
+df$Straightliner  <- apply(as.matrix(df[items]), 1, function(r) length(unique(r[!is.na(r)])) == 1)
+
+# ---- 5. ANALYSIS ----
+rel <- lapply(names(constructs), function(nm) {
+  it <- constructs[[nm]]
+  a <- suppressWarnings(suppressMessages(psych::alpha(as.data.frame(df[it]), check.keys = FALSE)))
+  data.frame(construct = nm, items = length(it),
+             alpha = a$total$raw_alpha, mean_inter_item_r = a$total$average_r)
+})
+a_design <- suppressWarnings(suppressMessages(psych::alpha(as.data.frame(df[paste0("q", 1:18)]), check.keys = FALSE)))
+rel <- rbind(do.call(rbind, rel),
+             data.frame(construct = "Design (q1-q18 combined)", items = 18,
+                        alpha = a_design$total$raw_alpha, mean_inter_item_r = a_design$total$average_r))
+rel$alpha <- round(rel$alpha, 3); rel$mean_inter_item_r <- round(rel$mean_inter_item_r, 3)
+rel$rating <- cut(rel$alpha, breaks = c(-Inf, 0.6, 0.7, 0.8, 0.9, Inf),
+                  labels = c("poor", "questionable", "acceptable", "good", "excellent"))
+print(rel, row.names = FALSE)
+
+print(ggplot(rel, aes(reorder(construct, alpha), alpha)) + geom_col(fill = "#1f4e79") +
+  geom_hline(yintercept = 0.7, linetype = "dashed", colour = "red") + coord_flip() +
+  labs(title = "Cronbach's alpha (dashed line = 0.70)", x = NULL, y = "alpha") + theme_minimal())
+
+# ---- 6. CONCLUSION ----
+low <- rel$construct[rel$alpha < 0.70]
+if (length(low)) {
+  cat("Below the 0.70 benchmark:", paste(low, collapse = ", "), "- interpret these with caution.\n")
+} else {
+  cat("All constructs reach alpha >= 0.70, so averaging the items into construct scores is justified.\n")
+}
+cat("Note: Color, Trust and Loyalty have only 2 items each; alpha is less stable for 2-item scales.\n")
+```
+
+
+## 3. Correlations between constructs (Spearman)
+
+```{r}
+#| label: c3-correlations
+#| fig-width: 9
+#| fig-height: 5
+# ---- 1. LIBRARY ----
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(psych)
+
+# ---- 2. DATA CONNECTION / DATA SOURCE ----
+DATA_PATH <- "dataset.csv"     # same folder as this .qmd, or give the full path
+raw <- read_csv(DATA_PATH, na = c("", "NA", "null"), show_col_types = FALSE)
+cat("Loaded", nrow(raw), "rows x", ncol(raw), "columns\n")
+
+# ---- 3. DATA CLEANING ----
+items <- paste0("q", 1:26)
+df <- raw |>
+  distinct(user_id, .keep_all = TRUE) |>                      # drop duplicate respondents
+  mutate(across(where(is.character), trimws),
+         gender   = factor(tolower(gender), levels = c("male", "female", "other")),
+         platform = factor(platform, levels = c("Desktop", "Mobile")),   # "null" became NA
+         language = factor(language),
+         across(all_of(items), ~ ifelse(.x >= 1 & .x <= 10, .x, NA)),    # valid scale is 1-10
+         age = ifelse(age >= 10 & age <= 100, age, NA)) |>               # implausible ages -> NA
+  filter(if_any(all_of(items), ~ !is.na(.x)))                            # drop empty responses
+cat("Respondents after cleaning:", nrow(df), "\n")
+cat("Ages set to NA (implausible, under 10):", sum(is.na(df$age)), "\n")
+cat("Respondents with unknown platform:", sum(is.na(df$platform)), "\n")
+cat("Missing item answers:", sum(is.na(df[items])), "\n")
+
+# ---- 4. DATA PREPARATION ----
+ALPHA <- 0.05
+constructs <- list(
+  Typography    = paste0("q", 1:3),
+  Color         = paste0("q", 4:5),
+  Content       = paste0("q", 6:8),
+  Interactivity = paste0("q", 9:13),
+  Navigation    = paste0("q", 14:18),
+  Satisfaction  = paste0("q", 19:22),
+  Trust         = paste0("q", 23:24),
+  Loyalty       = paste0("q", 25:26)
+)
+design_cols    <- c("Typography", "Color", "Content", "Interactivity", "Navigation")
+outcome_cols   <- c("Satisfaction", "Trust", "Loyalty")
+construct_cols <- c(design_cols, outcome_cols)
+for (nm in names(constructs)) {
+  df[[nm]] <- rowMeans(as.matrix(df[constructs[[nm]]]), na.rm = TRUE)   # construct score = mean of its items
+}
+df$Design_Overall <- rowMeans(as.matrix(df[design_cols]))
+df$Straightliner  <- apply(as.matrix(df[items]), 1, function(r) length(unique(r[!is.na(r)])) == 1)
+
+# ---- 5. ANALYSIS ----
+ct <- psych::corr.test(as.data.frame(df[construct_cols]), method = "spearman", adjust = "holm")
+r_mat <- ct$r
+p_mat <- ct$p                      # above the diagonal = Holm-adjusted p-values
+cat("Spearman correlation matrix:\n")
+print(round(r_mat, 2))
+
+heat <- as.data.frame(as.table(r_mat))
+names(heat) <- c("v1", "v2", "rho")
+print(ggplot(heat, aes(v1, v2, fill = rho)) + geom_tile(colour = "white") +
+  geom_text(aes(label = sprintf("%.2f", rho)), size = 3) +
+  scale_fill_gradient2(low = "#b2182b", mid = "white", high = "#2166ac", limits = c(-1, 1)) +
+  labs(title = "Spearman correlations between constructs", x = NULL, y = NULL) +
+  theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)))
+
+idx <- which(upper.tri(r_mat), arr.ind = TRUE)
+pair_tbl <- data.frame(var1 = rownames(r_mat)[idx[, 1]], var2 = colnames(r_mat)[idx[, 2]],
+                       rho = round(r_mat[idx], 3), p_holm = round(p_mat[idx], 4))
+pair_tbl <- pair_tbl[order(-abs(pair_tbl$rho)), ]
+cat("\nStrongest relationships:\n")
+print(head(pair_tbl, 8), row.names = FALSE)
+
+# ---- 6. CONCLUSION ----
+cat(sprintf("%d of %d construct pairs are significantly correlated after Holm adjustment.\n",
+            sum(pair_tbl$p_holm < ALPHA), nrow(pair_tbl)))
+top <- head(pair_tbl, 3)
+for (i in seq_len(nrow(top))) {
+  cat(sprintf("  %s vs %s: rho = %.2f (adj. p = %.4f)\n", top$var1[i], top$var2[i], top$rho[i], top$p_holm[i]))
+}
+cat("Correlation shows association only; see chunk 5 for the modelled paths.\n")
+```
+
+
+## 4. Group comparisons (platform, gender) and age
+
+```{r}
+#| label: c4-groups
+#| fig-width: 9
+#| fig-height: 5
+# ---- 1. LIBRARY ----
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+
+# ---- 2. DATA CONNECTION / DATA SOURCE ----
+DATA_PATH <- "dataset.csv"     # same folder as this .qmd, or give the full path
+raw <- read_csv(DATA_PATH, na = c("", "NA", "null"), show_col_types = FALSE)
+cat("Loaded", nrow(raw), "rows x", ncol(raw), "columns\n")
+
+# ---- 3. DATA CLEANING ----
+items <- paste0("q", 1:26)
+df <- raw |>
+  distinct(user_id, .keep_all = TRUE) |>                      # drop duplicate respondents
+  mutate(across(where(is.character), trimws),
+         gender   = factor(tolower(gender), levels = c("male", "female", "other")),
+         platform = factor(platform, levels = c("Desktop", "Mobile")),   # "null" became NA
+         language = factor(language),
+         across(all_of(items), ~ ifelse(.x >= 1 & .x <= 10, .x, NA)),    # valid scale is 1-10
+         age = ifelse(age >= 10 & age <= 100, age, NA)) |>               # implausible ages -> NA
+  filter(if_any(all_of(items), ~ !is.na(.x)))                            # drop empty responses
+cat("Respondents after cleaning:", nrow(df), "\n")
+cat("Ages set to NA (implausible, under 10):", sum(is.na(df$age)), "\n")
+cat("Respondents with unknown platform:", sum(is.na(df$platform)), "\n")
+cat("Missing item answers:", sum(is.na(df[items])), "\n")
+
+# ---- 4. DATA PREPARATION ----
+ALPHA <- 0.05
+constructs <- list(
+  Typography    = paste0("q", 1:3),
+  Color         = paste0("q", 4:5),
+  Content       = paste0("q", 6:8),
+  Interactivity = paste0("q", 9:13),
+  Navigation    = paste0("q", 14:18),
+  Satisfaction  = paste0("q", 19:22),
+  Trust         = paste0("q", 23:24),
+  Loyalty       = paste0("q", 25:26)
+)
+design_cols    <- c("Typography", "Color", "Content", "Interactivity", "Navigation")
+outcome_cols   <- c("Satisfaction", "Trust", "Loyalty")
+construct_cols <- c(design_cols, outcome_cols)
+for (nm in names(constructs)) {
+  df[[nm]] <- rowMeans(as.matrix(df[constructs[[nm]]]), na.rm = TRUE)   # construct score = mean of its items
+}
+df$Design_Overall <- rowMeans(as.matrix(df[design_cols]))
+df$Straightliner  <- apply(as.matrix(df[items]), 1, function(r) length(unique(r[!is.na(r)])) == 1)
+
+# ---- 5. ANALYSIS ----
+compare_two <- function(data, group_col, g1, g2) {
+  d <- data[data[[group_col]] %in% c(g1, g2), ]
+  out <- lapply(construct_cols, function(v) {
+    x <- d[[v]][d[[group_col]] == g1]
+    y <- d[[v]][d[[group_col]] == g2]
+    w <- wilcox.test(x, y, exact = FALSE)
+    data.frame(construct = v, n1 = length(x), n2 = length(y),
+               median1 = median(x), median2 = median(y), p = w$p.value)
+  })
+  out <- do.call(rbind, out)
+  names(out)[2:5] <- c(paste0("n_", g1), paste0("n_", g2), paste0("median_", g1), paste0("median_", g2))
+  out$p_holm <- p.adjust(out$p, method = "holm")
+  out[, c("p", "p_holm")] <- round(out[, c("p", "p_holm")], 4)
+  out
+}
+res_platform <- compare_two(df, "platform", "Desktop", "Mobile")
+res_gender   <- compare_two(df, "gender", "male", "female")
+cat("--- Platform: Desktop vs Mobile (Mann-Whitney) ---\n"); print(res_platform, row.names = FALSE)
+cat("\n--- Gender: male vs female (Mann-Whitney; 'other' excluded, n too small) ---\n"); print(res_gender, row.names = FALSE)
+
+age_tbl <- do.call(rbind, lapply(construct_cols, function(v) {
+  ct <- suppressWarnings(cor.test(df$age, df[[v]], method = "spearman", exact = FALSE))
+  data.frame(construct = v, rho = round(unname(ct$estimate), 3), p = round(ct$p.value, 4))
+}))
+age_tbl$p_holm <- round(p.adjust(age_tbl$p, method = "holm"), 4)
+cat("\n--- Age vs construct scores (Spearman) ---\n"); print(age_tbl, row.names = FALSE)
+
+plot_df <- df |> filter(!is.na(platform)) |> select(platform, all_of(outcome_cols)) |>
+  pivot_longer(-platform, names_to = "outcome", values_to = "score") |>
+  mutate(outcome = factor(outcome, levels = outcome_cols))
+print(ggplot(plot_df, aes(platform, score, fill = platform)) + geom_boxplot(show.legend = FALSE, outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.5) + facet_wrap(~outcome) +
+  labs(title = "Outcome scores by platform", x = NULL, y = "Score (1-10)") + theme_minimal())
+
+# ---- 6. CONCLUSION ----
+report <- function(tbl, label) {
+  s <- tbl$construct[tbl$p_holm < ALPHA]
+  if (length(s)) cat(label, ": significant differences (Holm-adjusted) in", paste(s, collapse = ", "), "\n")
+  else cat(label, ": no significant differences after Holm adjustment.\n")
+}
+report(res_platform, "Platform")
+report(res_gender, "Gender")
+sa <- age_tbl$construct[age_tbl$p_holm < ALPHA]
+if (length(sa)) cat("Age: significant association with", paste(sa, collapse = ", "), "\n") else cat("Age: no significant association with any construct.\n")
+cat(sprintf("Caution: Desktop has only %d respondents, so a real difference could go undetected.\n", sum(df$platform == "Desktop", na.rm = TRUE)))
+```
+
+
+## 5. Regression paths: design to satisfaction to trust to loyalty
+
+```{r}
+#| label: c5-regression
+#| fig-width: 9
+#| fig-height: 5
+# ---- 1. LIBRARY ----
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(car)
+
+# ---- 2. DATA CONNECTION / DATA SOURCE ----
+DATA_PATH <- "dataset.csv"     # same folder as this .qmd, or give the full path
+raw <- read_csv(DATA_PATH, na = c("", "NA", "null"), show_col_types = FALSE)
+cat("Loaded", nrow(raw), "rows x", ncol(raw), "columns\n")
+
+# ---- 3. DATA CLEANING ----
+items <- paste0("q", 1:26)
+df <- raw |>
+  distinct(user_id, .keep_all = TRUE) |>                      # drop duplicate respondents
+  mutate(across(where(is.character), trimws),
+         gender   = factor(tolower(gender), levels = c("male", "female", "other")),
+         platform = factor(platform, levels = c("Desktop", "Mobile")),   # "null" became NA
+         language = factor(language),
+         across(all_of(items), ~ ifelse(.x >= 1 & .x <= 10, .x, NA)),    # valid scale is 1-10
+         age = ifelse(age >= 10 & age <= 100, age, NA)) |>               # implausible ages -> NA
+  filter(if_any(all_of(items), ~ !is.na(.x)))                            # drop empty responses
+cat("Respondents after cleaning:", nrow(df), "\n")
+cat("Ages set to NA (implausible, under 10):", sum(is.na(df$age)), "\n")
+cat("Respondents with unknown platform:", sum(is.na(df$platform)), "\n")
+cat("Missing item answers:", sum(is.na(df[items])), "\n")
+
+# ---- 4. DATA PREPARATION ----
+ALPHA <- 0.05
+constructs <- list(
+  Typography    = paste0("q", 1:3),
+  Color         = paste0("q", 4:5),
+  Content       = paste0("q", 6:8),
+  Interactivity = paste0("q", 9:13),
+  Navigation    = paste0("q", 14:18),
+  Satisfaction  = paste0("q", 19:22),
+  Trust         = paste0("q", 23:24),
+  Loyalty       = paste0("q", 25:26)
+)
+design_cols    <- c("Typography", "Color", "Content", "Interactivity", "Navigation")
+outcome_cols   <- c("Satisfaction", "Trust", "Loyalty")
+construct_cols <- c(design_cols, outcome_cols)
+for (nm in names(constructs)) {
+  df[[nm]] <- rowMeans(as.matrix(df[constructs[[nm]]]), na.rm = TRUE)   # construct score = mean of its items
+}
+df$Design_Overall <- rowMeans(as.matrix(df[design_cols]))
+df$Straightliner  <- apply(as.matrix(df[items]), 1, function(r) length(unique(r[!is.na(r)])) == 1)
+
+# ---- 5. ANALYSIS ----
+z <- df |> mutate(across(all_of(construct_cols), ~ as.numeric(scale(.x))))    # standardise -> coefficients are betas
+
+m1 <- lm(Satisfaction ~ Typography + Color + Content + Interactivity + Navigation, data = z)
+m2 <- lm(Trust ~ Satisfaction, data = z)
+m3 <- lm(Loyalty ~ Satisfaction + Trust, data = z)
+
+cat("=== Model 1: Satisfaction ~ five design features ===\n"); print(summary(m1))
+cat("\nVariance inflation factors (above 5 suggests overlapping predictors):\n"); print(round(car::vif(m1), 2))
+cat("\n=== Model 2: Trust ~ Satisfaction ===\n"); print(summary(m2))
+cat("\n=== Model 3: Loyalty ~ Satisfaction + Trust ===\n"); print(summary(m3))
+cat("\nShapiro-Wilk on residuals (p < 0.05 = non-normal):",
+    sprintf("M1 %.3f | M2 %.3f | M3 %.3f\n", shapiro.test(resid(m1))$p.value,
+            shapiro.test(resid(m2))$p.value, shapiro.test(resid(m3))$p.value))
+
+coef_df <- bind_rows(
+  data.frame(model = "M1 Satisfaction", term = rownames(coef(summary(m1))), coef(summary(m1)), check.names = FALSE),
+  data.frame(model = "M3 Loyalty",      term = rownames(coef(summary(m3))), coef(summary(m3)), check.names = FALSE)) |>
+  filter(term != "(Intercept)")
+coef_df$lower <- coef_df$Estimate - 1.96 * coef_df$`Std. Error`
+coef_df$upper <- coef_df$Estimate + 1.96 * coef_df$`Std. Error`
+print(ggplot(coef_df, aes(Estimate, term)) + geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_pointrange(aes(xmin = lower, xmax = upper)) + facet_wrap(~model, scales = "free_y") +
+  labs(title = "Standardised coefficients with approximate 95% CI", x = "Beta", y = NULL) + theme_minimal())
+
+# ---- 6. CONCLUSION ----
+summarise_model <- function(m, label) {
+  s <- summary(m); cs <- coef(s)
+  f_p <- unname(pf(s$fstatistic[1], s$fstatistic[2], s$fstatistic[3], lower.tail = FALSE))
+  sig <- setdiff(rownames(cs)[cs[, 4] < ALPHA], "(Intercept)")
+  cat(sprintf("%s: R2 = %.2f (adjusted %.2f), model p = %.4f. ", label, s$r.squared, s$adj.r.squared, f_p))
+  if (length(sig)) cat("Significant predictors (beta):", paste(sprintf("%s (%.2f)", sig, cs[sig, 1]), collapse = ", "), "\n")
+  else cat("No individual predictor is significant at 5%.\n")
+}
+summarise_model(m1, "M1 Satisfaction")
+summarise_model(m2, "M2 Trust")
+summarise_model(m3, "M3 Loyalty")
+cat("Observational data with n =", nrow(df), ": read the paths as associations, not proof of cause. Design features overlap strongly (check the VIFs), which can hide individual effects.\n")
+```
+
+
+## 6. Exploratory factor analysis of the 18 design items
+
+```{r}
+#| label: c6-efa
+#| fig-width: 9
+#| fig-height: 5
+# ---- 1. LIBRARY ----
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(psych)
+
+# ---- 2. DATA CONNECTION / DATA SOURCE ----
+DATA_PATH <- "dataset.csv"     # same folder as this .qmd, or give the full path
+raw <- read_csv(DATA_PATH, na = c("", "NA", "null"), show_col_types = FALSE)
+cat("Loaded", nrow(raw), "rows x", ncol(raw), "columns\n")
+
+# ---- 3. DATA CLEANING ----
+items <- paste0("q", 1:26)
+df <- raw |>
+  distinct(user_id, .keep_all = TRUE) |>                      # drop duplicate respondents
+  mutate(across(where(is.character), trimws),
+         gender   = factor(tolower(gender), levels = c("male", "female", "other")),
+         platform = factor(platform, levels = c("Desktop", "Mobile")),   # "null" became NA
+         language = factor(language),
+         across(all_of(items), ~ ifelse(.x >= 1 & .x <= 10, .x, NA)),    # valid scale is 1-10
+         age = ifelse(age >= 10 & age <= 100, age, NA)) |>               # implausible ages -> NA
+  filter(if_any(all_of(items), ~ !is.na(.x)))                            # drop empty responses
+cat("Respondents after cleaning:", nrow(df), "\n")
+cat("Ages set to NA (implausible, under 10):", sum(is.na(df$age)), "\n")
+cat("Respondents with unknown platform:", sum(is.na(df$platform)), "\n")
+cat("Missing item answers:", sum(is.na(df[items])), "\n")
+
+# ---- 4. DATA PREPARATION ----
+ALPHA <- 0.05
+constructs <- list(
+  Typography    = paste0("q", 1:3),
+  Color         = paste0("q", 4:5),
+  Content       = paste0("q", 6:8),
+  Interactivity = paste0("q", 9:13),
+  Navigation    = paste0("q", 14:18),
+  Satisfaction  = paste0("q", 19:22),
+  Trust         = paste0("q", 23:24),
+  Loyalty       = paste0("q", 25:26)
+)
+design_cols    <- c("Typography", "Color", "Content", "Interactivity", "Navigation")
+outcome_cols   <- c("Satisfaction", "Trust", "Loyalty")
+construct_cols <- c(design_cols, outcome_cols)
+for (nm in names(constructs)) {
+  df[[nm]] <- rowMeans(as.matrix(df[constructs[[nm]]]), na.rm = TRUE)   # construct score = mean of its items
+}
+df$Design_Overall <- rowMeans(as.matrix(df[design_cols]))
+df$Straightliner  <- apply(as.matrix(df[items]), 1, function(r) length(unique(r[!is.na(r)])) == 1)
+
+design_items <- paste0("q", 1:18)
+x <- as.data.frame(na.omit(df[design_items]))
+
+# ---- 5. ANALYSIS ----
+kmo  <- psych::KMO(x)
+bart <- psych::cortest.bartlett(cor(x), n = nrow(x))
+cat(sprintf("KMO overall = %.2f (above 0.60 is acceptable). Bartlett test p = %.4g\n", kmo$MSA, bart$p.value))
+
+pa <- psych::fa.parallel(x, fa = "fa", n.iter = 20, plot = FALSE)
+nf <- pa$nfact
+if (is.null(nf) || is.na(nf)) nf <- 3
+nf <- max(1, min(nf, 5))
+cat("Factors retained by parallel analysis:", nf, "\n")
+
+fa_res <- psych::fa(x, nfactors = nf, rotate = if (nf > 1) "varimax" else "none", fm = "minres")
+cat("\nLoadings (values under 0.40 hidden):\n")
+print(fa_res$loadings, cutoff = 0.40, sort = TRUE)
+total_var <- sum(fa_res$communality) / ncol(x)
+cat(sprintf("\nVariance explained by the %d factor(s): %.0f%%\n", nf, 100 * total_var))
+
+L <- as.data.frame(unclass(fa_res$loadings))
+L$item <- factor(rownames(L), levels = design_items)
+L_long <- pivot_longer(L, -item, names_to = "factor", values_to = "loading")
+print(ggplot(L_long, aes(factor, item, fill = loading)) + geom_tile(colour = "white") +
+  geom_text(aes(label = sprintf("%.2f", loading)), size = 3) +
+  scale_fill_gradient2(low = "#b2182b", mid = "white", high = "#2166ac", limits = c(-1, 1)) +
+  labs(title = "Factor loadings (varimax)", x = NULL, y = NULL) + theme_minimal())
+
+# ---- 6. CONCLUSION ----
+for (f in setdiff(names(L), "item")) {
+  it <- as.character(L$item[abs(L[[f]]) >= 0.40])
+  cat(sprintf("%s: %s\n", f, if (length(it)) paste(it, collapse = ", ") else "(no item loads at 0.40 or above)"))
+}
+cat("Compare with the intended structure: Typography q1-q3, Color q4-q5, Content q6-q8, Interactivity q9-q13, Navigation q14-q18.\n")
+cat(sprintf("Caution: %d respondents for 18 items is a small sample (about %.0f:1), so treat the factors as exploratory.\n",
+            nrow(x), nrow(x) / 18))
+```
+
+
+## 7. Respondent segments (K-Means and hierarchical clustering)
+
+```{r}
+#| label: c7-clusters
+#| fig-width: 9
+#| fig-height: 5
+# ---- 1. LIBRARY ----
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(cluster)
+
+# ---- 2. DATA CONNECTION / DATA SOURCE ----
+DATA_PATH <- "dataset.csv"     # same folder as this .qmd, or give the full path
+raw <- read_csv(DATA_PATH, na = c("", "NA", "null"), show_col_types = FALSE)
+cat("Loaded", nrow(raw), "rows x", ncol(raw), "columns\n")
+
+# ---- 3. DATA CLEANING ----
+items <- paste0("q", 1:26)
+df <- raw |>
+  distinct(user_id, .keep_all = TRUE) |>                      # drop duplicate respondents
+  mutate(across(where(is.character), trimws),
+         gender   = factor(tolower(gender), levels = c("male", "female", "other")),
+         platform = factor(platform, levels = c("Desktop", "Mobile")),   # "null" became NA
+         language = factor(language),
+         across(all_of(items), ~ ifelse(.x >= 1 & .x <= 10, .x, NA)),    # valid scale is 1-10
+         age = ifelse(age >= 10 & age <= 100, age, NA)) |>               # implausible ages -> NA
+  filter(if_any(all_of(items), ~ !is.na(.x)))                            # drop empty responses
+cat("Respondents after cleaning:", nrow(df), "\n")
+cat("Ages set to NA (implausible, under 10):", sum(is.na(df$age)), "\n")
+cat("Respondents with unknown platform:", sum(is.na(df$platform)), "\n")
+cat("Missing item answers:", sum(is.na(df[items])), "\n")
+
+# ---- 4. DATA PREPARATION ----
+ALPHA <- 0.05
+constructs <- list(
+  Typography    = paste0("q", 1:3),
+  Color         = paste0("q", 4:5),
+  Content       = paste0("q", 6:8),
+  Interactivity = paste0("q", 9:13),
+  Navigation    = paste0("q", 14:18),
+  Satisfaction  = paste0("q", 19:22),
+  Trust         = paste0("q", 23:24),
+  Loyalty       = paste0("q", 25:26)
+)
+design_cols    <- c("Typography", "Color", "Content", "Interactivity", "Navigation")
+outcome_cols   <- c("Satisfaction", "Trust", "Loyalty")
+construct_cols <- c(design_cols, outcome_cols)
+for (nm in names(constructs)) {
+  df[[nm]] <- rowMeans(as.matrix(df[constructs[[nm]]]), na.rm = TRUE)   # construct score = mean of its items
+}
+df$Design_Overall <- rowMeans(as.matrix(df[design_cols]))
+df$Straightliner  <- apply(as.matrix(df[items]), 1, function(r) length(unique(r[!is.na(r)])) == 1)
+
+Z <- scale(as.data.frame(df[construct_cols]))
+
+# ---- 5. ANALYSIS ----
+set.seed(42)
+sil <- sapply(2:6, function(k) {
+  km_k <- kmeans(Z, centers = k, nstart = 25)
+  mean(cluster::silhouette(km_k$cluster, dist(Z))[, "sil_width"])
+})
+names(sil) <- 2:6
+cat("Average silhouette width by k:\n"); print(round(sil, 3))
+best_k <- as.integer(names(which.max(sil)))
+cat("Best k:", best_k, "\n")
+
+km <- kmeans(Z, centers = best_k, nstart = 50)
+df$Cluster <- factor(km$cluster)
+profile <- df |> group_by(Cluster) |>
+  summarise(n = n(), across(all_of(construct_cols), ~ round(mean(.x), 2)), .groups = "drop")
+cat("\nCluster profiles (mean construct scores):\n"); print(as.data.frame(profile))
+
+hc <- hclust(dist(Z), method = "ward.D2")
+cat("\nK-Means vs hierarchical (Ward) assignments:\n")
+print(table(KMeans = df$Cluster, Hierarchical = cutree(hc, k = best_k)))
+
+pcs <- as.data.frame(prcomp(Z)$x[, 1:2]); pcs$Cluster <- df$Cluster
+print(ggplot(pcs, aes(PC1, PC2, colour = Cluster)) + geom_point(size = 2.5) +
+  labs(title = "K-Means clusters (PCA view)") + theme_minimal())
+plot(hc, labels = FALSE, main = "Hierarchical clustering (Ward)", xlab = "", sub = "")
+
+# ---- 6. CONCLUSION ----
+strength <- if (sil[as.character(best_k)] > 0.5) "strong" else if (sil[as.character(best_k)] > 0.25) "moderate" else "weak"
+cat(sprintf("Respondents split into %d segments (silhouette = %.2f, %s structure).\n", best_k, sil[as.character(best_k)], strength))
+hi <- profile[which.max(profile$Satisfaction), ]; lo <- profile[which.min(profile$Satisfaction), ]
+cat(sprintf("Most satisfied segment: cluster %s (n = %d, satisfaction %.2f). Least satisfied: cluster %s (n = %d, satisfaction %.2f).\n",
+            as.character(hi$Cluster), hi$n, hi$Satisfaction, as.character(lo$Cluster), lo$n, lo$Satisfaction))
+cat("Segments are descriptive groupings of this sample, not validated customer types.\n")
+```
+
+
+## 8. Confidence intervals
+
+```{r}
+#| label: c8-confidence
+#| fig-width: 9
+#| fig-height: 5
+# ---- 1. LIBRARY ----
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+
+# ---- 2. DATA CONNECTION / DATA SOURCE ----
+DATA_PATH <- "dataset.csv"     # same folder as this .qmd, or give the full path
+raw <- read_csv(DATA_PATH, na = c("", "NA", "null"), show_col_types = FALSE)
+cat("Loaded", nrow(raw), "rows x", ncol(raw), "columns\n")
+
+# ---- 3. DATA CLEANING ----
+items <- paste0("q", 1:26)
+df <- raw |>
+  distinct(user_id, .keep_all = TRUE) |>                      # drop duplicate respondents
+  mutate(across(where(is.character), trimws),
+         gender   = factor(tolower(gender), levels = c("male", "female", "other")),
+         platform = factor(platform, levels = c("Desktop", "Mobile")),   # "null" became NA
+         language = factor(language),
+         across(all_of(items), ~ ifelse(.x >= 1 & .x <= 10, .x, NA)),    # valid scale is 1-10
+         age = ifelse(age >= 10 & age <= 100, age, NA)) |>               # implausible ages -> NA
+  filter(if_any(all_of(items), ~ !is.na(.x)))                            # drop empty responses
+cat("Respondents after cleaning:", nrow(df), "\n")
+cat("Ages set to NA (implausible, under 10):", sum(is.na(df$age)), "\n")
+cat("Respondents with unknown platform:", sum(is.na(df$platform)), "\n")
+cat("Missing item answers:", sum(is.na(df[items])), "\n")
+
+# ---- 4. DATA PREPARATION ----
+ALPHA <- 0.05
+constructs <- list(
+  Typography    = paste0("q", 1:3),
+  Color         = paste0("q", 4:5),
+  Content       = paste0("q", 6:8),
+  Interactivity = paste0("q", 9:13),
+  Navigation    = paste0("q", 14:18),
+  Satisfaction  = paste0("q", 19:22),
+  Trust         = paste0("q", 23:24),
+  Loyalty       = paste0("q", 25:26)
+)
+design_cols    <- c("Typography", "Color", "Content", "Interactivity", "Navigation")
+outcome_cols   <- c("Satisfaction", "Trust", "Loyalty")
+construct_cols <- c(design_cols, outcome_cols)
+for (nm in names(constructs)) {
+  df[[nm]] <- rowMeans(as.matrix(df[constructs[[nm]]]), na.rm = TRUE)   # construct score = mean of its items
+}
+df$Design_Overall <- rowMeans(as.matrix(df[design_cols]))
+df$Straightliner  <- apply(as.matrix(df[items]), 1, function(r) length(unique(r[!is.na(r)])) == 1)
+
+FAV_CUTOFF <- 7      # a construct score of 7 or more counts as "favourable" (assumption, change if needed)
+
+# ---- 5. ANALYSIS ----
+ci_one <- function(x, conf = 0.95) {
+  x <- x[!is.na(x)]; n <- length(x)
+  se <- sd(x) / sqrt(n); tcrit <- qt(1 - (1 - conf) / 2, n - 1)
+  c(n = n, mean = mean(x), lower = mean(x) - tcrit * se, upper = mean(x) + tcrit * se)
+}
+ci_tbl <- as.data.frame(t(sapply(df[construct_cols], ci_one)))
+ci_tbl$construct <- factor(rownames(ci_tbl), levels = construct_cols)
+cat("95% t-based confidence intervals for construct means:\n")
+print(data.frame(construct = ci_tbl$construct, n = ci_tbl$n, mean = round(ci_tbl$mean, 2),
+                 lower = round(ci_tbl$lower, 2), upper = round(ci_tbl$upper, 2)), row.names = FALSE)
+
+set.seed(42)
+boot <- replicate(5000, mean(sample(df$Satisfaction, replace = TRUE)))
+cat("\nBootstrap 95% CI for mean Satisfaction:", round(quantile(boot, c(0.025, 0.975)), 2), "\n")
+
+cat("\nShare of respondents with a favourable score (>=", FAV_CUTOFF, "), 95% CI:\n")
+fav <- do.call(rbind, lapply(outcome_cols, function(v) {
+  k <- sum(df[[v]] >= FAV_CUTOFF); n <- nrow(df); ci <- prop.test(k, n)$conf.int
+  data.frame(outcome = v, favourable = k, n = n, pct = round(100 * k / n, 1),
+             lower = round(100 * ci[1], 1), upper = round(100 * ci[2], 1))
+}))
+print(fav, row.names = FALSE)
+
+print(ggplot(ci_tbl, aes(mean, construct)) + geom_pointrange(aes(xmin = lower, xmax = upper)) +
+  scale_y_discrete(limits = rev(construct_cols)) + coord_cartesian(xlim = c(1, 10)) +
+  labs(title = "Mean construct score with 95% CI", x = "Mean (1-10)", y = NULL) + theme_minimal())
+
+# ---- 6. CONCLUSION ----
+s <- ci_tbl[ci_tbl$construct == "Satisfaction", ]
+cat(sprintf("We are 95%% confident the true mean satisfaction lies between %.2f and %.2f (sample mean %.2f).\n", s$lower, s$upper, s$mean))
+cat(sprintf("%.1f%% of respondents rate satisfaction at %d or above (95%% CI %.1f%%-%.1f%%).\n",
+            fav$pct[1], FAV_CUTOFF, fav$lower[1], fav$upper[1]))
+cat("With n =", nrow(df), "the intervals are wide; constructs whose intervals overlap should not be ranked against each other.\n")
+```
