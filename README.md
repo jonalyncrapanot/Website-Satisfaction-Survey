@@ -19,11 +19,25 @@ A survey analysis in R (Quarto) of how website design features relate to custome
 
 The analysis tests the path **design features → satisfaction → trust → loyalty** and profiles who the respondents are and how they differ.
 
+## Key findings
+
+Results from the rendered report (n = 73 after cleaning):
+
+- **Ratings are high overall.** Satisfaction averages 7.57/10 (95% CI 7.09-8.04), trust 7.52 and loyalty 7.45. About 70% of respondents score satisfaction at 7 or above. Typography is the best-rated construct (7.90) and Interactivity the lowest (6.99).
+- **The scales are reliable.** Cronbach's alpha is 0.74-0.92 for every construct, so averaging items into construct scores is justified.
+- **Everything is correlated.** All 28 construct pairs are significantly correlated (Holm-adjusted). The strongest are Interactivity-Navigation (rho = 0.84), Navigation-Satisfaction (0.80) and Trust-Loyalty (0.77).
+- **Navigation is the main driver of satisfaction.** In the regression, design features explain 78% of the variance in satisfaction (R2 = 0.78) and Navigation is the only significant predictor (beta = 0.57). Satisfaction predicts trust (beta = 0.67). Trust (0.60) and satisfaction (0.32) both predict loyalty (R2 = 0.72).
+- **Mobile users rate Interactivity higher than Desktop users** (median 7.8 vs 5.6, Holm-adjusted p = 0.02). Desktop has only 11 respondents, so treat this as a signal rather than proof. There are no gender differences.
+- **Older respondents rate Content, Interactivity and Navigation lower** (rho of -0.34 to -0.42, all significant after adjustment).
+- **Factor analysis suggests two factors, not five** (KMO = 0.81, 56% of variance explained), so the five design constructs overlap heavily.
+- **Two respondent segments.** A large satisfied group (n = 61, satisfaction 8.25) and a small dissatisfied group (n = 12, satisfaction 4.10), with moderate cluster structure (silhouette = 0.46).
+
 ## Repository contents
 
 | File | Description |
 |---|---|
 | `Website-satisfaction-survey.qmd` | Quarto report with all analyses (renders to a self-contained HTML file) |
+| `Website-satisfaction-survey.html` | Rendered report (open in a browser) |
 | `dataset.csv` | Survey data: 73 rows x 31 columns (`user_id`, `language`, `platform`, `gender`, `age`, `q1`-`q26`) |
 
 ## Analyses
