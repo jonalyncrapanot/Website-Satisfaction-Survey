@@ -40,7 +40,7 @@ Put `dataset.csv` in the same folder as this file (or change `DATA_PATH` in each
 #| fig-width: 9
 #| fig-height: 5
 # ---- 1. LIBRARY ----
-install.packages(c("dplyr", "tidyr", "ggplot2", "readr", "psych", "car"), dependencies = TRUE)
+#install.packages(c("dplyr", "tidyr", "ggplot2", "readr", "psych", "car"), dependencies = TRUE)
 
 library(dplyr)
 library(tidyr)
@@ -48,9 +48,7 @@ library(ggplot2)
 library(readr)
 
 # ---- 2. DATA CONNECTION / DATA SOURCE ----
-DATA_PATH <- "C:/Users/jonalyn.rapanot/OneDrive - Robinsons Retail Holdings Inc/01_CI Team/08_Github/05_Portfolio/Website-Satisfaction-Survey/dataset.csv"    # same folder as this .qmd, or give the full path
-
-DATA_PATH <-      # same folder as this .qmd, or give the full path
+DATA_PATH <- "dataset.csv"     # same folder as this .qmd, or give the full path
 raw <- read_csv(DATA_PATH, na = c("", "NA", "null"), show_col_types = FALSE)
 cat("Loaded", nrow(raw), "rows x", ncol(raw), "columns\n")
 
